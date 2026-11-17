@@ -3821,17 +3821,24 @@ const EXIF_EMPTY = { focal:'', aperture:'', shutter:'', iso:'', device:'', taken
 const SHUTTER_STEPS = [32000, 25000, 20000, 16000, 12800, 10000, 8000, 6400, 5000, 4000, 3200, 2500,
   2000, 1600, 1250, 1000, 800, 640, 500, 400, 320, 250, 200, 160, 125, 100, 80, 60, 50, 40, 30, 25,
   20, 15, 13, 10, 8, 6, 5, 4, 3, 2.5, 2, 1.6, 1.3];
-function shutterDenom(d) {
-  let best = SHUTTER_STEPS[0], bestDist = Infinity;
-  for (const st of SHUTTER_STEPS) {
-    const dist = Math.abs(Math.log(d / st));
-    if (dist < bestDist) { bestDist = dist; best = st; }
+/* Định dạng tốc độ chụp (s). Không làm tròn lệch giá trị EXIF: chỉ dùng mẫu số chuẩn hoặc
+   số nguyên khi sai số thời gian ≤ 0.5 ms và sai số mẫu số ≤ 2% (vd 1/7999.29 → 1/7999, 1/33 → 1/33);
+   v ≥ 0.1s hoặc không khớp → hiển thị giây thập phân (0.7s, 1.25s, 0.303s) thay vì ép về 1/1.3, 1/3... */
+function trimDec(x) {
+  let s = x.toFixed(3).replace(/0+$/, '');
+  return s.endsWith('.') ? s + '0' : s;
+}
+function formatShutter(v) {
+  if (v >= 1) return trimDec(v) + 's';
+  const d = 1 / v, TOL = 0.0005;
+  const ok = c => Math.abs(1 / c - v) <= TOL && Math.abs(c - d) / d <= 0.02;
+  const cands = [...SHUTTER_STEPS, Math.round(d)].filter(ok);
+  if (cands.length) {
+    cands.sort((a, b) => Math.abs(1 / a - v) - Math.abs(1 / b - v));
+    return '1/' + cands[0] + 's';
   }
-  if (bestDist <= Math.log(1.02)) return best;                             // (1)
-  const r = Math.round(d);
-  const round = r >= 100 ? r % 10 === 0 : r >= 10 ? r % 5 === 0 : r >= 1;
-  if (round && Math.abs(Math.log(d / r)) <= Math.log(1.02)) return r;       // (2)
-  return best;                                                             // (3)
+  if (v >= 0.1) return trimDec(v) + 's';
+  return '1/' + d.toFixed(1).replace(/\.0$/, '') + 's';
 }
 /* exifDevice: bản SAO tên máy gốc đọc từ EXIF lúc nạp ảnh, KHÔNG bao giờ bị ghi đè khi người
    dùng tự sửa "device" (tên hiển thị) — dùng để tìm "ảnh nào cùng máy" cho nút "Áp dụng tất cả"
@@ -4043,7 +4050,7 @@ function parseExifTiff(view, tiffStart) {
     if (exif[0x829D]) { const v = rational(exif[0x829D]); if (v) aperture = 'f/' + (Math.round(v * 10) / 10); }
     if (exif[0x829A]) {
       const v = rational(exif[0x829A]);
-      if (v) shutter = v >= 1 ? v.toFixed(1) + 's' : '1/' + shutterDenom(1 / v) + 's';
+      if (v) shutter = formatShutter(v);
     }
     if (exif[0x8827]) {
       const e = exif[0x8827];
